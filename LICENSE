@@ -1,0 +1,79 @@
+Business Source License 1.1
+
+Licensor:             Govind Barbade
+Licensed Work:        RunLogger (runlogger)
+                      © 2026 Govind Barbade. All rights reserved.
+Version:              1.1
+Change Date:          2029-01-01
+Change License:       Apache License, Version 2.0
+
+-----------------------------------------------------------------------------
+
+Terms
+
+1. Grant of Rights
+   Subject to these terms, the Licensor grants you a non-exclusive,
+   royalty-free right to use, copy, and modify the Licensed Work, solely
+   for the purpose of connecting to runlog.in services operated by the
+   Licensor.
+
+2. Use Restriction
+   The following uses are prohibited without prior written permission
+   from the Licensor:
+
+   a. Connecting the Licensed Work to any server other than runlog.in
+   b. Redistributing the Licensed Work as part of another product or service
+   c. Using the Licensed Work to build a competing run-logging or
+      ML telemetry service
+   d. Any modification redistributed publicly or commercially
+   e. Sublicensing, selling, or renting the Licensed Work or any derivative
+   f. Removing or altering any copyright, trademark, or attribution notices
+   g. Using the Licensed Work in any product that replicates or substitutes
+      the core functionality of runlog.in
+   h. Reverse engineering, decompiling, or disassembling any portion of
+      the Licensed Work
+   i. Using the Licensed Work to train, fine-tune, or build machine learning
+      models without prior written consent
+
+3. Personal Modification
+   Modification of the Licensed Work is permitted for personal,
+   non-redistributed use only. Any modified version must retain this
+   license header and all copyright notices in full.
+
+4. Attribution
+   Any permitted use must retain the following notice in all copies
+   or substantial portions of the Licensed Work:
+
+       "Powered by RunLogger — https://runlog.in"
+
+5. No Warranty
+   The Licensed Work is provided "as is", without warranty of any kind,
+   express or implied, including but not limited to warranties of
+   merchantability, fitness for a particular purpose, or non-infringement.
+   The Licensor shall not be liable for any damages arising from use of
+   the Licensed Work.
+
+6. Termination
+   Any breach of these terms automatically terminates your rights under
+   this License. Upon termination, you must immediately cease all use
+   and destroy all copies of the Licensed Work in your possession.
+
+7. Change Date
+   On the Change Date, the Licensed Work will be made available under
+   the Change License (Apache License 2.0), and this Use Restriction
+   will no longer apply.
+
+8. Governing Law
+   This License is governed by the laws of India. Any disputes shall
+   be subject to the exclusive jurisdiction of the courts of India.
+
+-----------------------------------------------------------------------------
+
+For commercial licensing enquiries:
+  runlog.uk@gmail.com
+  https://runlog.in
+
+-----------------------------------------------------------------------------
+
+This is not an open source license. For more information on the Business
+Source License, visit: https://mariadb.com/bsl11/

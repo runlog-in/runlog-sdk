@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "runlog-sdk"
+version = "0.1.0"
+description = "Universal training monitor for ML runs"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.8"
+dependencies = [
+    "requests",
+    "websockets",
+]
+
+classifiers = [
+    "License :: Other/Proprietary License",
+    "Programming Language :: Python :: 3",
+]
+
+[project.optional-dependencies]
+gpu = ["pynvml"]
+sys = ["psutil"]
+all = ["pynvml", "psutil"]
+
+[project.scripts]
+runlogger-sync = "runlogger.sync:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["runlogger*"]
