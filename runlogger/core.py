@@ -169,11 +169,11 @@ class RunLogger:
 
     def __init__(
         self,
-        base_url:          str,
         api_token:         str,
         project_name:      str,
         run_name:          Optional[str]  = None,
         config:            Optional[Dict] = None,
+        base_url:          Optional[str] = "https://runlog.in/",
         start_step:        int            = 0,
         metrics:           Optional[List] = None,
         tags:              Optional[List] = None,
@@ -350,13 +350,6 @@ class RunLogger:
         threading.Thread(target=self._ws_loop, daemon=True).start()
 
     def _log(self, msg: str, level: str = "info") -> None:
-        """
-        level:
-          info  — always shown  (connected, paused, resumed, finish, sync)
-          warn  — always shown  (offline, limits, plan changes, bans)
-          error — always shown  (hard failures)
-          debug — only if verbose=True
-        """
         if level == "debug" and not self._verbose:
             return
         prefix = {
@@ -383,15 +376,18 @@ class RunLogger:
 
     def should_pause(self) -> bool:
         if self._pause_flag:
-            self._flush_logs(trigger="paused", final=False)
             self._clear_pause()
             self._log("paused ⏸", "info")
+            if not self._ws:
+                self._flush_logs(trigger="paused", final=False)
             return True
         return False
 
     def finish(self, status: str = "completed") -> None:
         if self._banned:
             return
+        if not self._ws:
+            self._drain_pending_to_db() 
 
         deadline = time.monotonic() + 10.0
         while time.monotonic() < deadline:
@@ -458,6 +454,23 @@ class RunLogger:
         with self._lock:
             self._pending.append(payload)
 
+    def _drain_pending_to_db(self):
+        if not self._offline_mode or not self._db_path:
+            return
+        with self._lock:
+            items         = list(self._pending)
+            self._pending = []
+        if not items:
+            return
+        self._log(f"draining {len(items)} pending items to local DB", "debug")
+        for payload in items:
+            p   = json.dumps(payload)
+            s   = payload.get("step", -1)
+            pkt = payload.get("_pkt", -1)
+            self._db_submit(lambda con, p=p, s=s, pkt=pkt: con.execute(
+                "INSERT OR IGNORE INTO queue (step, pkt, payload, synced) VALUES (?, ?, ?, 0)",
+                (s, pkt, p)
+            ))
     def _sign(self, ts: float) -> str:
         if not self._secret:
             return ""
@@ -535,8 +548,9 @@ class RunLogger:
                             if self._offline_mode:
                                 await self._flush_offline_queue(ws)
                                 await self._flush_offline_logs(ws)
-                                await asyncio.get_event_loop().run_in_executor(None, self._dump_orphaned_runs)
-
+                                async def _run_orphan_dump():
+                                    await asyncio.get_event_loop().run_in_executor(None, self._dump_orphaned_runs)
+                                asyncio.create_task(_run_orphan_dump())
                             while not self._stop:
 
                                 while not _ctrl_inbox.empty():
@@ -583,10 +597,25 @@ class RunLogger:
 
                                         elif ctrl == "pause":
                                             self._pause_flag = True
+                                            drain_deadline = time.monotonic() + 3.0
+                                            while time.monotonic() < drain_deadline:
+                                                log_lines = []
+                                                while not self._log_queue.empty():
+                                                    try:
+                                                        log_lines.append(self._log_queue.get_nowait())
+                                                    except queue.Empty:
+                                                        break
+                                                if log_lines:
+                                                    await ws.send(json.dumps({
+                                                        "_type": "terminal_log",
+                                                        "text": "".join(log_lines),
+                                                    }))
+                                                await asyncio.sleep(0.1)
+
+                                            self._pause_flag = True
 
                                         elif ctrl == "resume":
                                             self._pause_flag = False
-                                            self._log("resumed ▶", "info")
 
                                         elif ctrl == "banned":
                                             self._cache_put("banned", True)
@@ -620,16 +649,23 @@ class RunLogger:
 
                                 if batch:
                                     now = time.monotonic()
-                                    if now - _last_send_t < self._min_interval:
+                                    wait_remaining = self._min_interval - (now - _last_send_t)
+                                    
+                                    if wait_remaining > 0:
+                                        with self._lock:
+                                            self._pending = batch + self._pending 
                                         await asyncio.sleep(0.005)
                                         continue
 
-                                    _last_send_t = now
+                                    _send_start = time.monotonic()
+                                    
 
                                     if self._ws_delay > 0:
                                         await asyncio.sleep(self._ws_delay)
 
                                     await ws.send(json.dumps(batch))
+                                    _last_send_t = time.monotonic()
+
                                     self._log_count += len(batch)
                                     self._log(f"batch of {len(batch)} sent (total={self._log_count})", "debug")
 
@@ -644,9 +680,19 @@ class RunLogger:
                                             "_type": "terminal_log",
                                             "text":  "".join(log_lines),
                                         }))
-
                                     await asyncio.sleep(0.001)
                                 else:
+                                    log_lines = []
+                                    while not self._log_queue.empty():
+                                        try:
+                                            log_lines.append(self._log_queue.get_nowait())
+                                        except queue.Empty:
+                                            break
+                                    if log_lines:
+                                        await ws.send(json.dumps({
+                                            "_type": "terminal_log",
+                                            "text":  "".join(log_lines),
+                                        }))
                                     await asyncio.sleep(0.005)
 
                         finally:
@@ -659,6 +705,7 @@ class RunLogger:
 
                 except Exception as e:
                     self._ws = None
+                    self._drain_pending_to_db()
                     log_lines = []
                     while not self._log_queue.empty():
                         try:
@@ -680,9 +727,10 @@ class RunLogger:
         asyncio.run(_run())
 
     async def _flush_offline_queue(self, ws):
+        loop = asyncio.get_event_loop()
         flush_event = threading.Event()
         self._db_queue.put(lambda con, e=flush_event: e.set())
-        flush_event.wait(timeout=5.0)
+        await loop.run_in_executor(None, lambda: flush_event.wait(timeout=5.0))
 
         try:
             con  = sqlite3.connect(self._db_path)
@@ -707,11 +755,14 @@ class RunLogger:
             ids      = [r[0] for r in batch]
             payloads = [json.loads(r[2]) for r in batch]
             try:
-                resp = requests.post(
-                    f"{self.base}/api/runs/{self.run_id}/offline-sync",
-                    headers=self.headers,
-                    json=payloads,
-                    timeout=30,
+                resp = await loop.run_in_executor(
+                    None,
+                    lambda p=payloads: requests.post(
+                        f"{self.base}/api/runs/{self.run_id}/offline-sync",
+                        headers=self.headers,
+                        json=p,
+                        timeout=30,
+                    )
                 )
                 if resp.ok:
                     data      = resp.json()
@@ -751,6 +802,7 @@ class RunLogger:
         threading.Thread(target=self._set_run_status, args=("running",), daemon=True).start()
 
     async def _flush_offline_logs(self, ws):
+        loop = asyncio.get_event_loop()
         log_lines = []
         while not self._log_queue.empty():
             try:
@@ -759,13 +811,13 @@ class RunLogger:
                 break
         if log_lines:
             text = "".join(log_lines)
-            t = "offline"
+            t    = "offline"
             flush_event = threading.Event()
             self._db_submit(lambda con, text=text, t=t: (
                 con.execute("INSERT INTO terminal_logs (trigger, logs, synced) VALUES (?, ?, 0)", (t, text)),
                 flush_event.set()
             ))
-            flush_event.wait(timeout=3.0)
+            await loop.run_in_executor(None, lambda: flush_event.wait(timeout=3.0))
 
         try:
             con  = sqlite3.connect(self._db_path)
