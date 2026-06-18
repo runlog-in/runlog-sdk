@@ -199,6 +199,8 @@ class RunLogger:
         self._banned        = False
         self._pkt_seq       = 0
         self._last_sent_pkt = 0
+        self._knobs      = {}
+        self._knob_dirty = False
         self.capture_terminal = capture_terminal
 
         self._log_queue = queue.Queue()
@@ -526,12 +528,19 @@ class RunLogger:
                                 _register_logged = True
                             await asyncio.sleep(10)
                             continue
-
+                    self._load_knobs_from_db()
                     async with websockets.connect(ws_url, additional_headers=self.headers) as ws:
                         self._ws         = ws
                         _offline_logged  = False
                         _register_logged = False
                         self._log("connected", "info")
+
+                        if self._knobs:
+                            await ws.send(json.dumps({
+                                "_type": "knob_definitions",
+                                "knobs": self._knobs,
+                            }))
+                            self._knob_dirty = False
 
                         _ctrl_inbox: asyncio.Queue = asyncio.Queue()
 
@@ -628,6 +637,16 @@ class RunLogger:
                                         elif ctrl == "metrics_capped":
                                             self._log(f"metrics cap reached: {data.get('reason', '')}", "warn")
 
+                                        elif ctrl == "knob_update":
+                                            key = data.get("key")
+                                            val = data.get("value")
+                                            if key and key in self._knobs:
+                                                self._knobs[key]["value"] = float(val)
+                                                self._knob_dirty = False
+                                                if self._offline_mode:
+                                                    self._persist_knobs()
+                                                self._log(f"knob '{key}' → {val}", "debug")
+
                                         elif ctrl == "ack":
                                             if self._offline_mode:
                                                 for pkt in data.get("pkts", []):
@@ -693,6 +712,13 @@ class RunLogger:
                                             "_type": "terminal_log",
                                             "text":  "".join(log_lines),
                                         }))
+                                    if self._knob_dirty and self._knobs:
+                                        await ws.send(json.dumps({
+                                            "_type": "knob_definitions",
+                                            "knobs": self._knobs,
+                                        }))
+                                        self._knob_dirty = False
+
                                     await asyncio.sleep(0.005)
 
                         finally:
@@ -747,7 +773,7 @@ class RunLogger:
         self._log(f"syncing {len(rows)} offline packets...", "info")
         threading.Thread(target=self._set_run_status, args=("dumping",), daemon=True).start()
 
-        BATCH          = 50
+        BATCH          = 1000
         all_synced_ids = []
 
         for i in range(0, len(rows), BATCH):
@@ -987,7 +1013,7 @@ class RunLogger:
                     continue
 
                 success      = True
-                BATCH        = 200
+                BATCH        = 1000
                 synced_count = 0
 
                 for i in range(0, len(all_payloads), BATCH):
@@ -1261,5 +1287,36 @@ class RunLogger:
                 timeout=3,
             )
             self._pause_flag = False
+        except Exception:
+            pass
+    def register_knob(self, key: str, value: float, *, min: float = 0.0, max: float = 1.0, label: str = None) -> None:
+        self._knobs[key] = {
+            "value": float(value),
+            "min":   float(min),
+            "max":   float(max),
+            "label": label or key,
+        }
+        self._knob_dirty = True
+        if self._offline_mode:
+            self._persist_knobs()
+
+    @property
+    def knobs(self) -> dict:
+        return {k: v["value"] for k, v in self._knobs.items()}
+    
+    def _persist_knobs(self):
+        data = json.dumps(self._knobs)
+        self._db_submit(lambda con, d=data: con.execute(
+            "INSERT OR REPLACE INTO run_meta (key, value) VALUES (?, ?)",
+            ("knobs", d)
+        ))
+
+    def _load_knobs_from_db(self):
+        try:
+            con = sqlite3.connect(self._db_path)
+            row = con.execute("SELECT value FROM run_meta WHERE key='knobs'").fetchone()
+            con.close()
+            if row:
+                self._knobs = json.loads(row[0])
         except Exception:
             pass

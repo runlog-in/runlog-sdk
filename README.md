@@ -13,22 +13,23 @@ Works with any training framework: PyTorch, JAX, TensorFlow, or plain Python.
 3. [Initialization](#initialization)
 4. [Logging Metrics](#logging-metrics)
 5. [Logging Evaluations](#logging-evaluations)
-6. [Pausing & Resuming](#pausing--resuming)
-7. [Finishing a Run](#finishing-a-run)
-8. [Logging Artifacts](#logging-artifacts)
-9. [Offline Mode](#offline-mode)
-10. [Manual Sync CLI](#manual-sync-cli)
-11. [Auto Run Names](#auto-run-names)
-12. [System Stats](#system-stats)
-13. [Context Manager](#context-manager)
-14. [Run Configuration](#run-configuration)
-15. [Tags & Notes](#tags--notes)
-16. [API Token](#api-token)
-17. [Plans & Limits](#plans--limits)
-18. [Error Handling](#error-handling)
-19. [Full Example](#full-example)
-20. [License](#license)
-21. [FAQ](#faq)
+6. [Runtime Knobs](#runtime-knobs)
+7. [Pausing & Resuming](#pausing--resuming)
+8. [Finishing a Run](#finishing-a-run)
+9. [Logging Artifacts](#logging-artifacts)
+10. [Offline Mode](#offline-mode)
+11. [Manual Sync CLI](#manual-sync-cli)
+12. [Auto Run Names](#auto-run-names)
+13. [System Stats](#system-stats)
+14. [Context Manager](#context-manager)
+15. [Run Configuration](#run-configuration)
+16. [Tags & Notes](#tags--notes)
+17. [API Token](#api-token)
+18. [Plans & Limits](#plans--limits)
+19. [Error Handling](#error-handling)
+20. [Full Example](#full-example)
+21. [License](#license)
+22. [FAQ](#faq)
 
 ---
 
@@ -109,6 +110,7 @@ logger = RunLogger(
 | `verbose` | `bool` | `False` | Print internal debug info — packet counts, intervals, orphan detail. Useful for troubleshooting. |
 
 ---
+
 
 ## Logging Metrics
 
@@ -195,6 +197,147 @@ for step in range(1000):
 
     time.sleep(1)   # remove in real training
 ```
+
+---
+
+## Runtime Knobs
+
+Runtime Knobs let you expose Python variables as live controls on the RunLogger dashboard. During training, collaborators with permission can adjust these values without restarting the process. Your script simply reads the latest value from `logger.knobs`.
+
+Typical use cases include:
+
+- Learning rate
+- Batch size (apply at a safe synchronization point, such as the next epoch)
+- Evaluation frequency
+- Dropout
+- Data augmentation strength
+- Debug delays
+- Custom application parameters
+
+---
+
+## Registering a Knob
+
+```python
+logger.register_knob(
+    key="lr",
+    value=1e-3,
+    min=1e-5,
+    max=1e-2,
+)
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `key` | `str` | required | Unique identifier for the knob. |
+| `value` | `float \| int` | required | Initial value shown on the dashboard. |
+| `min` | `float \| int` | `0.0` | Minimum allowed value. |
+| `max` | `float \| int` | `1.0` | Maximum allowed value. |
+| `label` | `str` | `key` | Optional display name shown in the dashboard. |
+
+A knob may be registered before training starts or dynamically while the run is already in progress.
+
+---
+
+## Reading Knob Values
+
+Current values are available through the read-only `logger.knobs` dictionary.
+
+```python
+lr = logger.knobs.get("lr", 1e-3)
+```
+
+Read knob values wherever they affect your training loop. Values are synchronized automatically while the run is active.
+
+---
+
+## Example: Live Learning Rate
+
+```python
+logger.register_knob(
+    "lr",
+    value=1e-3,
+    min=1e-5,
+    max=1e-2,
+)
+
+for step in range(total_steps):
+
+    lr = logger.knobs.get("lr", 1e-3)
+
+    optimizer.param_groups[0]["lr"] = lr
+
+    loss = train_step()
+
+    logger.log(
+        step=step,
+        loss=loss,
+        lr=lr,
+    )
+```
+
+Move the **LR** dial in the dashboard and the training process begins using the updated value immediately.
+
+---
+
+## Example: Batch Size
+
+Some parameters cannot safely change during an active optimization step. Batch size is typically applied between epochs.
+
+```python
+logger.register_knob(
+    "batch_size",
+    value=64,
+    min=8,
+    max=512,
+)
+
+current_batch_size = 64
+
+for epoch in range(num_epochs):
+
+    new_batch_size = int(
+        logger.knobs.get("batch_size", current_batch_size)
+    )
+
+    if new_batch_size != current_batch_size:
+
+        current_batch_size = new_batch_size
+
+        train_loader = DataLoader(
+            dataset,
+            batch_size=current_batch_size,
+            shuffle=True,
+        )
+
+    train_one_epoch(train_loader)
+```
+
+---
+
+## Permissions
+
+Runtime Knobs are visible to everyone who can view the run.
+
+Only the project owner and collaborators with **Member** (or higher) permissions can modify knob values. Changes are synchronized to every connected client in real time.
+
+---
+
+## Offline Mode
+
+When `offline_mode=True`, the latest knob values are preserved locally. If the training process temporarily disconnects or reconnects, the most recent values are restored automatically.
+
+---
+
+## Best Practices
+
+- Read knob values immediately before using them.
+- Apply structural changes such as batch size only at safe synchronization points (for example, between epochs).
+- Use knobs to tune long-running experiments without restarting training.
+- Register knobs at any point during a run to expose new runtime controls.
+- Every knob change is recorded in the run timeline for reproducibility and auditing.
 
 ---
 
