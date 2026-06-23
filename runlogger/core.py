@@ -1317,6 +1317,9 @@ class RunLogger:
             row = con.execute("SELECT value FROM run_meta WHERE key='knobs'").fetchone()
             con.close()
             if row:
-                self._knobs = json.loads(row[0])
+                db_knobs = json.loads(row[0])
+                for k, v in db_knobs.items():
+                    if k in self._knobs:
+                        self._knobs[k]["value"] = v["value"]
         except Exception:
             pass
