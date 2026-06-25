@@ -723,7 +723,6 @@ def save_checkpoint(step):
 # ─────────────────────────────────────────────────────────────
 
 logger = RunLogger(
-    base_url="https://runlog.in",
     api_token=os.environ["RUNLOG_API_TOKEN"],
     project_name="koyna-v2",
     run_name="sft-run-1",
@@ -800,15 +799,15 @@ except Exception as e:
 
 ## License
 
-RunLogger is distributed under the **Business Source License 1.1**.
+RunLogger is distributed under the **Runlog SDK Proprietary License**.
 
 - Free to use for any purpose when connecting to [runlog.in](https://runlog.in)
 - Modification permitted for personal use only
 - Redistribution or use with other servers requires written permission
 
-For commercial licensing: [runlog.uk@gmail.com](mailto:runlog.uk@gmail.com)
+For commercial licensing: [contact@runlog.in](mailto:contact@runlog.in)
 
-Full terms: [runlog.in/auth/terms](https://runlog.in/auth/terms)
+Full terms: [runlog.in/legal/terms](https://runlog.in/legal/terms)
 
 ---
 

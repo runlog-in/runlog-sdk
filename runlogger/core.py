@@ -1,9 +1,6 @@
-# Copyright (c) 2026 Runlog (runlog.in). All rights reserved.
-# Licensed under the Business Source License 1.1.
-# See LICENSE file or https://runlog.in/auth/terms for full terms.
-# Unauthorized use with non-runlog.in servers is prohibited.
-# Reverse engineering, sublicensing, or use in competing services is prohibited.
-# Use of this code to train or fine-tune ML models requires written consent.
+# Copyright (c) 2026 Govind Barbade (runlog.in)
+# Licensed under the Runlog SDK Proprietary License.
+# See LICENSE file or https://runlog.in/legal/terms for full terms.
 
 """
 RunLogger — Universal Training Monitor
@@ -11,7 +8,6 @@ RunLogger — Universal Training Monitor
 from runlogger import RunLogger
 
 logger = RunLogger(
-    base_url="http://localhost:8000",
     project_name="my-project",
     api_token="rl-...",
     run_name="run-1",
@@ -238,7 +234,7 @@ class RunLogger:
         self._daily_limit  = int(plan.get("daily_log_limit",     -1))
         self._max_metrics  = int(plan.get("max_metrics_tracked", -1))
 
-        _project_cache_key       = f"project:{project_name}:{api_token}"
+        _project_cache_key       = f"project:{project_name}:{api_token}:{self.base}"
         _project_offline_created = False
         try:
             r = requests.get(
@@ -297,7 +293,11 @@ class RunLogger:
             self._cache["offline_created"] = True
             self._log("offline — run will be synced on reconnect", "warn")
 
-        print(f"[Runlog] {project_name} / {run_name}")
+        if _offline_created:
+            print(f"[Runlog] {project_name} / {run_name}  (url available after sync)")
+        else:
+            print(f"[Runlog] {project_name} / {run_name}")
+            print(f"  \033[32m{self.base}/#run/{self.run_id}\033[0m")
 
         if self._offline_mode:
             os.makedirs("dumps", exist_ok=True)
@@ -354,13 +354,19 @@ class RunLogger:
     def _log(self, msg: str, level: str = "info") -> None:
         if level == "debug" and not self._verbose:
             return
+        colors = {
+            "warn":  "\033[31m",
+            "error": "\033[31m",
+        }
         prefix = {
             "info":  "[Runlog]",
             "warn":  "[Runlog] ⚠",
             "error": "[Runlog] ✖",
             "debug": "[Runlog] ~",
         }.get(level, "[Runlog]")
-        print(f"{prefix} {msg}")
+        color = colors.get(level, "")
+        reset = "\033[0m" if color else ""
+        print(f"{color}{prefix} {msg}{reset}")
 
     def log(self, step: int, **kwargs) -> bool:
         if self._banned:
@@ -473,6 +479,7 @@ class RunLogger:
                 "INSERT OR IGNORE INTO queue (step, pkt, payload, synced) VALUES (?, ?, ?, 0)",
                 (s, pkt, p)
             ))
+
     def _sign(self, ts: float) -> str:
         if not self._secret:
             return ""
@@ -521,6 +528,7 @@ class RunLogger:
                                 ))
                                 self._cache["offline_created"] = False
                                 self._log(f"run registered on server: {self.run_id}", "debug")
+                                self._log(f"view run → \033[32m{self.base}/#run/{self.run_id}\033[0m", "info")
                                 _register_logged = False
                         except Exception:
                             if not _register_logged:
@@ -533,7 +541,7 @@ class RunLogger:
                         self._ws         = ws
                         _offline_logged  = False
                         _register_logged = False
-                        self._log("connected", "info")
+                        self._log("\033[32mconnected\033[0m", "info")
 
                         if self._knobs:
                             await ws.send(json.dumps({
@@ -640,8 +648,14 @@ class RunLogger:
                                         elif ctrl == "knob_update":
                                             key = data.get("key")
                                             val = data.get("value")
+                                            new_min = data.get("min")
+                                            new_max = data.get("max")
                                             if key and key in self._knobs:
                                                 self._knobs[key]["value"] = float(val)
+                                                if new_min is not None:
+                                                    self._knobs[key]["min"] = float(new_min)
+                                                if new_max is not None:
+                                                    self._knobs[key]["max"] = float(new_max)
                                                 self._knob_dirty = False
                                                 if self._offline_mode:
                                                     self._persist_knobs()
@@ -824,7 +838,7 @@ class RunLogger:
                 f"DELETE FROM queue WHERE id IN ({','.join(['?']*len(ids))})", ids
             ))
 
-        self._log("offline sync complete ✓", "info")
+        self._log("\033[32moffline sync complete ✓\033[0m", "info")
         threading.Thread(target=self._set_run_status, args=("running",), daemon=True).start()
 
     async def _flush_offline_logs(self, ws):
@@ -892,7 +906,9 @@ class RunLogger:
                 all_payloads = [json.loads(r[1]) for r in rows]
 
                 orphan_token  = meta.get("api_token")
-                orphan_base   = meta.get("base_url", self.base)
+                orphan_base   = (meta.get("base_url") or self.base).rstrip("/")
+                if orphan_base != self.base.rstrip("/"):
+                    continue
                 orphan_run_id = meta.get("run_id") or db_path.replace(".runlog_", "").replace(".db", "")
 
                 if not orphan_token:
