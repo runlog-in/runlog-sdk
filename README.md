@@ -47,6 +47,8 @@ pip install git+https://github.com/runlog-in/runlog-sdk.git
 
 ## Quickstart
 
+[![Getting Started with Runlog](https://img.youtube.com/vi/eG2NTzpA8xI/maxresdefault.jpg)](https://www.youtube.com/watch?v=eG2NTzpA8xI)
+
 ```python
 import time
 import math
